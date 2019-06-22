@@ -57,12 +57,12 @@ class Trainer():
 		if(not os.path.exists(self.save_img_dir)):
 			os.makedirs(self.save_img_dir)
 
-	def gradient_penalty(self, real_image, fake_image):
+	def gradient_penalty(self, x, real_image, fake_image):
 		bs = real_image.size(0)
 		alpha = torch.FloatTensor(bs, 1, 1, 1).uniform_(0, 1).expand(real_image.size()).to(self.device)
 		interpolation = alpha * real_image + (1 - alpha) * fake_image
 
-		c_xi = self.netD(interpolation)
+		c_xi = self.netD(x, interpolation)
 		gradients = autograd.grad(c_xi, interpolation, torch.ones(c_xi.size()).to(self.device),
 								  create_graph = True, retain_graph = True, only_inputs = True)[0]
 		gradients = gradients.view(bs, -1)
@@ -93,7 +93,7 @@ class Trainer():
 					errD = self.loss.d_loss(c_xr, c_xf, y, fake_y)
 				
 				if(self.use_gradient_penalty != False):
-					errD += self.use_gradient_penalty * self.gradient_penalty(y, fake_y)
+					errD += self.use_gradient_penalty * self.gradient_penalty(x, y, fake_y)
 
 				errD.backward()
 				self.optimizerD.step()
