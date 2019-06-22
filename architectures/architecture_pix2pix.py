@@ -489,3 +489,6 @@ class UNet_G(nn.Module):
 		del ens
 		out = self.tanh(out)
 		return out
+
+a = UNet_G(1, 3, 256)
+print(a)
