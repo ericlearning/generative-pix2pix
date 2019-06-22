@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 from dataset import Dataset
-from architectures.pix2pix import UNet_G, ResNet_G_256x256, PatchGan_D_70x70, PatchGan_D_286x286
-from architectures.pix2pixhd import Pix2PixHD_G
+from architectures.architecture_pix2pix import UNet_G, ResNet_G_256x256, PatchGan_D_70x70, PatchGan_D_286x286
+from architectures.architecture_pix2pixhd import Pix2PixHD_G
 from trainers_advanced.trainer import Trainer
 from trainers_hd_advanced.trainer_hd import Trainer_HD
 from utils import save, load
