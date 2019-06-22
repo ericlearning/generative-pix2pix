@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from utils import set_lr, get_lr, generate_noise, plot_multiple_images, save_fig, save, lab_to_rgb, get_sample_images_list
+from losses.losses import SGAN, LSGAN, HINGEGAN, WGAN, RASGAN, RALSGAN, RAHINGEGAN, QPGAN
 
 class Trainer_HD():
 	def __init__(self, loss_type, netD, netG, device, train_dl, val_dl, lr_D = 0.0002, lr_G = 0.0002, resample = True, weight_clip = None, use_gradient_penalty = False, loss_interval = 50, image_interval = 50, save_img_dir = 'saved_images/'):
