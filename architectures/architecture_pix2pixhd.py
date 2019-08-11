@@ -5,12 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.spectral_norm as SpectralNorm
 
-def get_norm(norm_type, size):
-	if(norm_type == 'batchnorm'):
-		return nn.BatchNorm2d(size)
-	elif(norm_type == 'instancenorm'):
-		return nn.InstanceNorm2d(size)
-
 class Nothing(nn.Module):
 	def __init__(self):
 		super(Nothing, self).__init__()
@@ -18,10 +12,33 @@ class Nothing(nn.Module):
 	def forward(self, x):
 		return x
 
+def get_norm(norm_type, size):
+	if(norm_type == 'batchnorm'):
+		return nn.BatchNorm2d(size)
+	elif(norm_type == 'instancenorm'):
+		return nn.InstanceNorm2d(size)
+
+def get_activation(activation_type):
+	if(activation_type == 'relu'):
+		return nn.ReLU(inplace = True)
+	elif(activation_type == 'leakyrelu'):
+		return nn.LeakyReLU(0.2, inplace = True)
+	elif(activation_type == 'elu'):
+		return nn.ELU(inplace = True)
+	elif(activation_type == 'selu'):
+		return nn.SELU(inplace = True)
+	elif(activation_type == 'prelu'):
+		return nn.PReLU()
+	elif(activation_type == 'tanh'):
+		return nn.Tanh()
+	elif(activation_type == None):
+		return Nothing()
+
 class ConvBlock(nn.Module):
-	def __init__(self, ni, no, ks, stride, pad = None, pad_type = 'Zero', use_bn = True, use_pixelshuffle = False, norm_type = 'batchnorm', activation_type = 'leakyrelu'):
+	def __init__(self, ni, no, ks, stride, pad = None, use_bn = True, use_sn = False, use_pixelshuffle = False, norm_type = 'batchnorm', activation_type = 'leakyrelu', pad_type = 'Zero'):
 		super(ConvBlock, self).__init__()
 		self.use_bn = use_bn
+		self.use_sn = use_sn
 		self.use_pixelshuffle = use_pixelshuffle
 		self.norm_type = norm_type
 		self.pad_type = pad_type
@@ -29,91 +46,72 @@ class ConvBlock(nn.Module):
 		if(pad == None):
 			pad = ks // 2 // stride
 
+		ni_ = ni
 		if(use_pixelshuffle):
-			if(self.pad_type == 'Zero'):
-				self.conv = nn.Conv2d(ni, no * 2 * 2, ks, stride, pad, bias = False)
-			elif(self.pad_type == 'Reflection'):
-				self.conv = nn.Conv2d(ni, no * 2 * 2, ks, stride, 0, bias = False)
-				self.reflection = nn.ReflectionPad2d(pad)
 			self.pixelshuffle = nn.PixelShuffle(2)
+			ni_ = ni // 4
+		
+		if(pad_type == 'Zero'):
+			self.conv = nn.Conv2d(ni_, no, ks, stride, pad, bias = False)
 		else:
-			if(self.pad_type == 'Zero'):
-				self.conv = nn.Conv2d(ni, no, ks, stride, pad, bias = False)
-			elif(self.pad_type == 'Reflection'):
-				self.conv = nn.Conv2d(ni, no, ks, stride, 0, bias = False)
-				self.reflection = nn.ReflectionPad2d(pad)
+			self.conv = nn.Sequential(*[
+				nn.ReflectionPad2d(pad),
+				nn.Conv2d(ni_, no, ks, stride, 0, bias = False)
+			])
 
-		if(self.use_bn == True):
-			if(self.norm_type == 'batchnorm'):
-				self.bn = nn.BatchNorm2d(no)
-			elif(self.norm_type == 'instancenorm'):
-				self.bn = nn.InstanceNorm2d(no)
-			elif(self.norm_type == 'spectralnorm'):
-				self.conv = SpectralNorm(self.conv)
+		if(self.use_bn):
+			self.bn = get_norm(norm_type, no)
+		if(self.use_sn):
+			self.conv = SpectralNorm(self.conv)
 
-
-		if(activation_type == 'relu'):
-			self.act = nn.ReLU(inplace = True)
-		elif(activation_type == 'leakyrelu'):
-			self.act = nn.LeakyReLU(0.2, inplace = True)
-		elif(activation_type == 'elu'):
-			self.act = nn.ELU(inplace = True)
-		elif(activation_type == 'selu'):
-			self.act = nn.SELU(inplace = True)
-		elif(activation_type == None):
-			self.act = Nothing()
+		self.act = get_activation(activation_type)
 
 	def forward(self, x):
-		if(self.pad_type == 'Reflection'):
-			x = self.reflection(x)
-		out = self.conv(x)
-		if(self.use_pixelshuffle == True):
+		out = x
+		if(self.use_pixelshuffle):
 			out = self.pixelshuffle(out)
-		if(self.use_bn == True and self.norm_type != 'spectralnorm'):
+		out = self.conv(out)
+		if(self.use_bn):
 			out = self.bn(out)
 		out = self.act(out)
 		return out
 
 class DeConvBlock(nn.Module):
-	def __init__(self, ni, no, ks, stride, pad = None, output_pad = 0, use_bn = True, norm_type = 'batchnorm', activation_type = 'leakyrelu'):
+	def __init__(self, ni, no, ks, stride, pad = None, output_pad = 0, use_bn = True, use_sn = False, norm_type = 'batchnorm', activation_type = 'leakyrelu', pad_type = 'Zero'):
 		super(DeConvBlock, self).__init__()
 		self.use_bn = use_bn
+		self.use_sn = use_sn
 		self.norm_type = norm_type
+		self.pad_type = pad_type
 
 		if(pad is None):
 			pad = ks // 2 // stride
 
-		self.deconv = nn.ConvTranspose2d(ni, no, ks, stride, pad, output_padding = output_pad, bias = False)
+		if(pad_type == 'Zero'):
+			self.deconv = nn.ConvTranspose2d(ni, no, ks, stride, pad, output_padding = output_pad, bias = False)
+		else:
+			self.deconv = nn.Sequential(*[
+				nn.ReflectionPad2d(pad),
+				nn.ConvTranspose2d(ni, no, ks, stride, 0, output_padding = output_pad, bias = False)
+			])
 
-		if(self.use_bn == True):
-			if(self.norm_type == 'batchnorm'):
-				self.bn = nn.BatchNorm2d(no)
-			elif(self.norm_type == 'instancenorm'):
-				self.bn = nn.InstanceNorm2d(no)
-			elif(self.norm_type == 'spectralnorm'):
-				self.deconv = SpectralNorm(self.deconv)
+		if(self.use_bn):
+			self.bn = get_norm(norm_type, no)
+		if(self.use_sn):
+			self.deconv = SpectralNorm(self.deconv)
 
-		if(activation_type == 'relu'):
-			self.act = nn.ReLU(inplace = True)
-		elif(activation_type == 'leakyrelu'):
-			self.act = nn.LeakyReLU(0.2, inplace = True)
-		elif(activation_type == 'elu'):
-			self.act = nn.ELU(inplace = True)
-		elif(activation_type == 'selu'):
-			self.act = nn.SELU(inplace = True)
-		elif(activation_type == None):
-			self.act = Nothing()
+		self.act = get_activation(activation_type)
 
 	def forward(self, x):
 		out = self.deconv(x)
-		if(self.use_bn == True and self.norm_type != 'spectralnorm'):
+		if(self.use_bn):
 			out = self.bn(out)
 		out = self.act(out)
 		return out
 
 # Residual Block
 class ResBlock(nn.Module):
-	def __init__(self, ic, oc, norm_type = 'instancenorm'):
+	def __init__(self, ic, oc, use_bn = True, use_sn = False, norm_type = 'instancenorm'):
 		super(ResBlock, self).__init__()
 		self.ic = ic
 		self.oc = oc
@@ -126,13 +124,11 @@ class ResBlock(nn.Module):
 		self.conv1 = nn.Conv2d(ic, oc, 3, 1, 0, bias = False)
 		self.conv2 = nn.Conv2d(oc, oc, 3, 1, 0, bias = False)
 
-		if(self.norm_type == 'spectralnorm'):
+		if(self.use_sn):
 			self.conv1 = SpectralNorm(self.conv1)
 			self.conv2 = SpectralNorm(self.conv2)
-			self.bn1 = Nothing()
-			self.bn2 = Nothing()
 
-		else:
+		if(use_bn):
 			if(self.norm_type == 'batchnorm'):
 				self.bn1 = nn.BatchNorm2d(oc)
 				self.bn2 = nn.BatchNorm2d(oc)
@@ -140,6 +136,10 @@ class ResBlock(nn.Module):
 			elif(self.norm_type == 'instancenorm'):
 				self.bn1 = nn.InstanceNorm2d(oc)
 				self.bn2 = nn.InstanceNorm2d(oc)
+
+		else:
+			self.bn1 = Nothing()
+			self.bn2 = Nothing()
 
 	def forward(self, x):
 		out = self.reflection_pad1(x)

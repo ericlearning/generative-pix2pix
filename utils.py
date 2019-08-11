@@ -72,6 +72,15 @@ def plot_multiple_images(images, h, w):
 	plt.show()
 	return fig
 
+def get_display_samples(samples, num_samples_x, num_samples_y):
+	sz = samples[0].shape[0]
+	nc = samples[0].shape[2]
+	display = np.zeros((sz*num_samples_x, sz*num_samples_y, nc))
+	for i in range(num_samples_y):
+		for j in range(num_samples_x):
+			display[i*sz:(i+1)*sz, j*sz:(j+1)*sz, :] = cv2.cvtColor(samples[i*num_samples_x+j]*255.0, cv2.COLOR_BGR2RGB)
+	return display.astype(np.uint8)
+
 def save(filename, netD, netG, optD, optG):
 	state = {
 		'netD' : netD.state_dict(),
@@ -112,6 +121,7 @@ def lab_to_rgb(img):
 def get_sample_images_list(mode, inputs):
 	if(mode == 'Pix2pix_Normal'):
 		val_data, netG, device = inputs[0], inputs[1], inputs[2]
+		netG.eval()
 		with torch.no_grad():
 			val_x = val_data[0].to(device)
 			val_y = val_data[1].to(device)
@@ -132,13 +142,14 @@ def get_sample_images_list(mode, inputs):
 		for j in range(3):
 			cur_img = (sample_output_images[j] + 1) / 2.0
 			sample_output_images_list.append(cur_img.transpose(1, 2, 0))
-		
+		netG.train()
 		sample_images_list.extend(sample_input_images_list)
 		sample_images_list.extend(sample_fake_images_list)
 		sample_images_list.extend(sample_output_images_list)
 
 	elif(mode == 'Pix2pix_Colorization'):
 		val_data, netG, device = inputs[0], inputs[1], inputs[2]
+		netG.eval()
 		with torch.no_grad():
 			val_x = val_data[0].to(device)
 			val_y = val_data[1].to(device)
@@ -160,12 +171,13 @@ def get_sample_images_list(mode, inputs):
 			cur_img_2 = sample_fake_images[j].transpose(1, 2, 0)
 			cur_img = lab_to_rgb(np.concatenate([cur_img_1, cur_img_2], axis = 2))
 			sample_fake_images_list.append(cur_img)
-		
+		netG.train()
 		sample_images_list.extend(sample_fake_images_list)
 		sample_images_list.extend(sample_output_images_list)
 
 	elif(mode == 'Pix2pixHD_Normal'):
 		val_data, netG, stage, device = inputs[0], inputs[1], inputs[2], inputs[3]
+		netG.eval()
 		with torch.no_grad():
 			val_x = val_data[0].to(device)
 			val_y = val_data[1].to(device)
@@ -186,9 +198,35 @@ def get_sample_images_list(mode, inputs):
 		for j in range(3):
 			cur_img = (sample_output_images[j] + 1) / 2.0
 			sample_output_images_list.append(cur_img.transpose(1, 2, 0))
-		
+		netG.train()
 		sample_images_list.extend(sample_input_images_list)
 		sample_images_list.extend(sample_fake_images_list)
 		sample_images_list.extend(sample_output_images_list)
 
 	return sample_images_list
+
+def get_require_type(loss_type):
+	if(loss_type == 'SGAN' or loss_type == 'LSGAN' or loss_type == 'HINGEGAN' or loss_type == 'WGAN'):
+		require_type = 0
+	elif(loss_type == 'RASGAN' or loss_type == 'RALSGAN' or loss_type == 'RAHINGEGAN'):
+		require_type = 1
+	elif(loss_type == 'QPGAN'):
+		require_type = 2
+	else:
+		require_type = -1
+	return require_type
+
+def get_gan_loss(device, loss_type):
+	loss_dict = {'SGAN':SGAN, 'LSGAN':LSGAN, 'HINGEGAN':HINGEGAN, 'WGAN':WGAN, 'RASGAN':RASGAN, 'RALSGAN':RALSGAN, 'RAHINGEGAN':RAHINGEGAN, 'QPGAN':QPGAN}
+	require_type = get_require_type(loss_type)
+
+	if(require_type == 0):
+		loss = loss_dict[loss_type](device)
+	elif(require_type == 1):
+		loss = loss_dict[loss_type](device)
+	elif(require_type == 2):
+		loss = loss_dict[loss_type](device, 'L1')
+	else:
+		loss = None
+
+	return loss

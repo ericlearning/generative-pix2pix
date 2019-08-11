@@ -6,13 +6,19 @@ import torch.nn.functional as F
 import numpy as np
 import pandas as pd
 import torch.optim as optim
+import torch.autograd as autograd
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
-from utils import set_lr, get_lr, generate_noise, plot_multiple_images, save_fig, save, lab_to_rgb, get_sample_images_list
+from utils import *
+from losses.losses import *
 
-class Trainer_RALSGAN_Pix2PixHD():
-	def __init__(self, netD, netG, device, train_dl, val_dl, lr_D = 0.0002, lr_G = 0.0002, loss_interval = 50, image_interval = 50, snapshot_interval = None, save_img_dir = 'saved_images/', save_snapshot_dir = 'saved_snapshots', resample = False):
+class Trainer_HD():
+	def __init__(self, loss_type, netD, netG, device, train_dl, val_dl, lr_D = 0.0002, lr_G = 0.0002, resample = True, weight_clip = None, use_gradient_penalty = False, loss_interval = 50, image_interval = 50, save_img_dir = 'saved_images/'):
+		self.loss_type = loss_type
+		self.require_type = get_require_type(self.loss_type)
+		self.loss = get_gan_loss(self.device, self.loss_type)
+
 		self.netD = netD
 		self.netG = netG
 		self.train_dl = train_dl
@@ -22,6 +28,8 @@ class Trainer_RALSGAN_Pix2PixHD():
 		self.train_iteration_per_epoch = len(self.train_dl)
 		self.device = device
 		self.resample = resample
+		self.weight_clip = weight_clip
+		self.use_gradient_penalty = use_gradient_penalty
 		self.special = None
 
 		self.optimizerD = optim.Adam(self.netD.parameters(), lr = self.lr_D, betas = (0, 0.9))
@@ -32,18 +40,26 @@ class Trainer_RALSGAN_Pix2PixHD():
 
 		self.loss_interval = loss_interval
 		self.image_interval = image_interval
-		self.snapshot_interval = snapshot_interval
 
 		self.errD_records = []
 		self.errG_records = []
 
 		self.save_cnt = 0
 		self.save_img_dir = save_img_dir
-		self.save_snapshot_dir = save_snapshot_dir
 		if(not os.path.exists(self.save_img_dir)):
 			os.makedirs(self.save_img_dir)
-		if(not os.path.exists(self.save_snapshot_dir)):
-			os.makedirs(self.save_snapshot_dir)
+
+	def gradient_penalty(self, x, real_image, fake_image):
+		bs = real_image.size(0)
+		alpha = torch.FloatTensor(bs, 1, 1, 1).uniform_(0, 1).expand(real_image.size()).to(self.device)
+		interpolation = alpha * real_image + (1 - alpha) * fake_image
+
+		c_xi = self.netD(x, interpolation)
+		gradients = autograd.grad(c_xi, interpolation, torch.ones(c_xi.size()).to(self.device),
+								  create_graph = True, retain_graph = True, only_inputs = True)[0]
+		gradients = gradients.view(bs, -1)
+		penalty = torch.mean((gradients.norm(2, dim=1) - 1) ** 2)
+		return penalty
 
 	def resize_input(self, stage, x, y, fake_y):
 		if(stage == 0):
@@ -77,10 +93,8 @@ class Trainer_RALSGAN_Pix2PixHD():
 	def train(self, num_epochs):
 		for stage, num_epoch in enumerate(num_epochs):
 			for epoch in range(num_epoch):
-
 				if(self.resample):
 					train_dl_iter = iter(self.train_dl)
-
 				for i, (x, y) in enumerate(tqdm(self.train_dl)):
 					x = x.to(self.device)
 					y = y.to(self.device)
@@ -105,20 +119,30 @@ class Trainer_RALSGAN_Pix2PixHD():
 					c_xr_3 = c_xr_3.view(-1)
 					c_xf_3 = self.netD(x3, fake_y_3.detach())
 					c_xf_3 = c_xf_3.view(-1)
-					
-					# calculate the discriminator loss
-					real_label_1 = torch.ones(c_xr_1.size()).to(self.device)
-					real_label_2 = torch.ones(c_xr_2.size()).to(self.device)
-					real_label_3 = torch.ones(c_xr_3.size()).to(self.device)
-					errD_1 = (torch.mean((c_xr_1 - torch.mean(c_xf_1) - real_label_1)**2) + torch.mean((c_xf_1 - torch.mean(c_xr_1) + real_label_1)**2)) / 2.0
-					errD_2 = (torch.mean((c_xr_2 - torch.mean(c_xf_2) - real_label_2)**2) + torch.mean((c_xf_2 - torch.mean(c_xr_2) + real_label_2)**2)) / 2.0
-					errD_3 = (torch.mean((c_xr_3 - torch.mean(c_xf_3) - real_label_3)**2) + torch.mean((c_xf_3 - torch.mean(c_xr_3) + real_label_3)**2)) / 2.0
+
+					if(self.require_type == 0 or self.require_type == 1):
+						errD_1 = self.loss.d_loss(c_xr_1, c_xf_1)
+						errD_2 = self.loss.d_loss(c_xr_2, c_xf_2)
+						errD_3 = self.loss.d_loss(c_xr_3, c_xf_3)
+					elif(self.require_type == 2):
+						errD_1 = self.loss.d_loss(c_xr_1, c_xf_1, y1, fake_y_1)
+						errD_2 = self.loss.d_loss(c_xr_2, c_xf_2, y2, fake_y_2)
+						errD_3 = self.loss.d_loss(c_xr_3, c_xf_3, y3, fake_y_3)
+
+					if(self.use_gradient_penalty != False):
+						errD_1 += self.use_gradient_penalty * self.gradient_penalty(x1, y1, fake_y_1)
+						errD_2 += self.use_gradient_penalty * self.gradient_penalty(x2, y2, fake_y_2)
+						errD_3 += self.use_gradient_penalty * self.gradient_penalty(x3, y3, fake_y_3)
+
 					errD = errD_1 + errD_2 + errD_3
 					errD.backward()
 					# update D using the gradients calculated previously
 					self.optimizerD.step()
 
-					# -log(D(G(x), y)) + L1(G(x), y)
+					if(self.weight_clip != None):
+						for param in self.netD.parameters():
+							param.data.clamp_(-self.weight_clip, self.weight_clip)
+
 					self.netG.zero_grad()
 					if(self.resample):
 						x, y = next(train_dl_iter)
@@ -144,9 +168,32 @@ class Trainer_RALSGAN_Pix2PixHD():
 					c_xf_3 = c_xf_3.view(-1)
 
 					# calculate the Generator loss
-					errG_a_1 = (torch.mean((c_xf_1 - torch.mean(c_xr_1) - real_label_1)**2) + torch.mean((c_xr_1 - torch.mean(c_xf_1) + real_label_1)**2)) / 2.0
-					errG_a_2 = (torch.mean((c_xf_2 - torch.mean(c_xr_2) - real_label_2)**2) + torch.mean((c_xr_2 - torch.mean(c_xf_2) + real_label_2)**2)) / 2.0
-					errG_a_3 = (torch.mean((c_xf_3 - torch.mean(c_xr_3) - real_label_3)**2) + torch.mean((c_xr_3 - torch.mean(c_xf_3) + real_label_3)**2)) / 2.0
+					# calculate this even if type is 0, because we need to utilize feature matching loss
+					c_xr_1, feature_1_a = self.netD(x1, y1, return_feature = True)
+					c_xr_1 = c_xr_1.view(-1)
+					c_xf_1, feature_1_b = self.netD(x1, fake_y_1, return_feature = True)
+					c_xf_1 = c_xf_1.view(-1)
+
+					c_xr_2, feature_2_a = self.netD(x2, y2, return_feature = True)
+					c_xr_2 = c_xr_2.view(-1)
+					c_xf_2, feature_2_b = self.netD(x2, fake_y_2, return_feature = True)
+					c_xf_2 = c_xf_2.view(-1)
+
+					c_xr_3, feature_3_a = self.netD(x3, y3, return_feature = True)
+					c_xr_3 = c_xr_3.view(-1)
+					c_xf_3, feature_3_b = self.netD(x3, fake_y_3, return_feature = True)
+					c_xf_3 = c_xf_3.view(-1)
+
+					if(self.require_type == 0):
+						errG_a_1 = self.loss.g_loss(c_xf_1)
+						errG_a_2 = self.loss.g_loss(c_xf_2)
+						errG_a_3 = self.loss.g_loss(c_xf_3)
+
+					if(self.require_type == 1 or self.require_type == 2):	
+						errG_a_1 = self.loss.g_loss(c_xr_1, c_xf_1)
+						errG_a_2 = self.loss.g_loss(c_xr_2, c_xf_2)
+						errG_a_3 = self.loss.g_loss(c_xr_3, c_xf_3)
+
 					errG_a = errG_a_1 + errG_a_2 + errG_a_3
 
 					errG_b_1, errG_b_2, errG_b_3 = 0, 0, 0
@@ -176,12 +223,7 @@ class Trainer_RALSGAN_Pix2PixHD():
 					if(i % self.image_interval == 0):
 						if(self.special == None):
 							sample_images_list = get_sample_images_list('Pix2pixHD_Normal', (self.val_dl, self.netG, stage, self.device))
-							plot_fig = plot_multiple_images(sample_images_list, 3, 3)
+							plot_fig = get_display_samples(sample_images_list, 3, 3)
 							cur_file_name = os.path.join(self.save_img_dir, str(self.save_cnt)+' : '+str(epoch)+'-'+str(i)+'.jpg')
 							self.save_cnt += 1
-							save_fig(cur_file_name, plot_fig)
-							plot_fig.clf()
-
-					if(self.snapshot_interval is not None):
-						if(i % self.snapshot_interval == 0):
-							save(os.path.join(self.save_snapshot_dir, 'Stage' + str(stage) + 'Epoch' + str(epoch) + '_' + str(i) + '.state'), self.netD, self.netG, self.optimizerD, self.optimizerG)
+							cv2.imwrite(cur_file_name, plot_img)
