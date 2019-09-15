@@ -151,11 +151,10 @@ class ResBlock(nn.Module):
 
 # ResNet Generator
 class ResNet_G_256x256(nn.Module):
-	def __init__(self, ic, oc, use_f = True, use_bn = True, use_sn = False, norm_type = 'instancenorm'):
+	def __init__(self, ic, oc, use_bn = True, use_sn = False, norm_type = 'instancenorm'):
 		super(ResNet_G_256x256, self).__init__()
 		self.ic = ic
 		self.oc = oc
-		self.use_f = use_f
 
 		self.relu = nn.ReLU(inplace = True)
 
