@@ -14,7 +14,7 @@ from losses.losses import *
 
 class Trainer():
 	def __init__(self, loss_type, netD, netG, device, train_dl, val_dl, lr_D = 0.0002, lr_G = 0.0002, resample = True, weight_clip = None, use_gradient_penalty = False, loss_interval = 50, image_interval = 50, save_img_dir = 'saved_images/'):
-		self.loss_type = loss_type
+		self.loss_type, self.device = loss_type, device
 		self.require_type = get_require_type(self.loss_type)
 		self.loss = get_gan_loss(self.device, self.loss_type)
 
@@ -129,14 +129,14 @@ class Trainer():
 				if(i % self.image_interval == 0):
 					if(self.special == 'Colorization'):
 						sample_images_list = get_sample_images_list('Pix2pix_Colorization', (self.val_dl, self.netG, self.device))
-						plot_fig = get_display_samples(sample_images_list, 2, 3)
+						plot_img = get_display_samples(sample_images_list, 2, 3)
 						cur_file_name = os.path.join(self.save_img_dir, str(self.save_cnt)+' : '+str(epoch)+'-'+str(i)+'.jpg')
 						self.save_cnt += 1
 						cv2.imwrite(cur_file_name, plot_img)
 
 					else:
 						sample_images_list = get_sample_images_list('Pix2pix_Normal', (self.val_dl, self.netG, self.device))
-						plot_fig = get_display_samples(sample_images_list, 3, 3)
+						plot_img = get_display_samples(sample_images_list, 3, 3)
 						cur_file_name = os.path.join(self.save_img_dir, str(self.save_cnt)+' : '+str(epoch)+'-'+str(i)+'.jpg')
 						self.save_cnt += 1
 						cv2.imwrite(cur_file_name, plot_img)

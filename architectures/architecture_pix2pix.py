@@ -124,7 +124,7 @@ class ResBlock(nn.Module):
 		self.conv1 = nn.Conv2d(ic, oc, 3, 1, 0, bias = False)
 		self.conv2 = nn.Conv2d(oc, oc, 3, 1, 0, bias = False)
 
-		if(self.use_sn):
+		if(use_sn):
 			self.conv1 = SpectralNorm(self.conv1)
 			self.conv2 = SpectralNorm(self.conv2)
 

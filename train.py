@@ -6,7 +6,7 @@ from dataset import Dataset
 from architectures.architecture_pix2pix import UNet_G, ResNet_G_256x256, PatchGan_D_70x70, PatchGan_D_286x286
 from architectures.architecture_pix2pixhd import Pix2PixHD_G
 from trainers.trainer import Trainer
-from trainers_hd.trainer_hd import Trainer_HD
+from trainers.trainer_hd import Trainer_HD
 from utils import save, load
 
 train_dir_name = ['data/file/train/input', 'data/file/train/target']
@@ -33,6 +33,12 @@ train_data = Dataset(train_dir_name, basic_types = 'Pix2Pix', shuffle = True)
 val_data = Dataset(val_dir_name, basic_types = 'Pix2Pix', shuffle = False)
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 netD = PatchGan_D_70x70(ic, oc, use_sigmoid, norm_type).to(device)
+
+# netD1 = PatchGan_D_70x70(ic, oc, use_sigmoid, norm_type).to(device)
+# netD2 = PatchGan_D_70x70(ic, oc, use_sigmoid, norm_type).to(device)
+# netD3 = PatchGan_D_70x70(ic, oc, use_sigmoid, norm_type).to(device)
+# netD = [netD1, netD2, netD3]
+
 netG = UNet_G(ic, oc, sz, True, norm_type, dropout_num = 3).to(device)
 # netG = Pix2PixHD_G(ic, oc).to(device)
 

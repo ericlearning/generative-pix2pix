@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.spectral_norm as SpectralNorm
+import torchvision.models as models
 
 class Nothing(nn.Module):
 	def __init__(self):
@@ -124,7 +125,7 @@ class ResBlock(nn.Module):
 		self.conv1 = nn.Conv2d(ic, oc, 3, 1, 0, bias = False)
 		self.conv2 = nn.Conv2d(oc, oc, 3, 1, 0, bias = False)
 
-		if(self.use_sn):
+		if(use_sn):
 			self.conv1 = SpectralNorm(self.conv1)
 			self.conv2 = SpectralNorm(self.conv2)
 
@@ -476,3 +477,17 @@ class Local(nn.Module):
 			out = self.tanh(out)
 
 		return out
+
+class VGG():
+	def __init__(self):
+		super(VGG, self).__init__()
+		self.f = model.vgg19(pretrained = True).features
+		self.split = [0, 2, 7, 12, 21, 30]
+
+	def forward(self, x):
+		outs = []
+		out = x
+		for i in range(len(self.split) - 1):
+			out = self.f[self.split[i]:self.split[i+1]](x)
+			outs.append(out)
+		return outs

@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 from scipy.io import wavfile
 from PIL import Image
+from losses.losses import *
 
 def set_lr(optimizer, lrs):
 	if(len(lrs) == 1):
